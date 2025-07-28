@@ -1,0 +1,146 @@
+name: Trigger Jenkins Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - release/*
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '.github/**'
+  
+  pull_request:
+    branches:
+      - main
+      - develop
+    types: [closed]
+  
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      skip_tests:
+        description: 'Skip Tests'
+        required: false
+        default: false
+        type: boolean
+      git_branch:
+        description: 'Git Branch to Deploy'
+        required: false
+        default: 'main'
+        type: string
+
+env:
+  JENKINS_URL: ${{ secrets.JENKINS_URL }}
+  JENKINS_USER: ${{ secrets.JENKINS_USER }}
+  JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+  JENKINS_JOB_NAME: "CEA-Commerce-Deployment"
+
+jobs:
+  trigger-jenkins:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Determine deployment environment
+      id: env-config
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          echo "skip_tests=${{ github.event.inputs.skip_tests }}" >> $GITHUB_OUTPUT
+          echo "git_branch=${{ github.event.inputs.git_branch }}" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+          echo "skip_tests=false" >> $GITHUB_OUTPUT
+          echo "git_branch=main" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "skip_tests=false" >> $GITHUB_OUTPUT
+          echo "git_branch=develop" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
+          echo "environment=staging" >> $GITHUB_OUTPUT
+          echo "skip_tests=false" >> $GITHUB_OUTPUT
+          echo "git_branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        else
+          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "skip_tests=true" >> $GITHUB_OUTPUT
+          echo "git_branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Trigger Jenkins Pipeline
+      run: |
+        curl -X POST \
+          -u "$JENKINS_USER:$JENKINS_TOKEN" \
+          "$JENKINS_URL/job/$JENKINS_JOB_NAME/buildWithParameters" \
+          -d "DEPLOYMENT_ENVIRONMENT=${{ steps.env-config.outputs.environment }}" \
+          -d "SKIP_TESTS=${{ steps.env-config.outputs.skip_tests }}" \
+          -d "GIT_BRANCH=${{ steps.env-config.outputs.git_branch }}" \
+          -d "GITHUB_SHA=${{ github.sha }}" \
+          -d "GITHUB_REF=${{ github.ref }}" \
+          -d "GITHUB_ACTOR=${{ github.actor }}"
+        
+    - name: Wait for Jenkins job to start
+      run: |
+        sleep 10
+        
+    - name: Get Jenkins build number
+      id: jenkins-build
+      run: |
+        BUILD_NUMBER=$(curl -s -u "$JENKINS_USER:$JENKINS_TOKEN" \
+          "$JENKINS_URL/job/$JENKINS_JOB_NAME/api/json" | \
+          jq -r '.lastBuild.number')
+        echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+        echo "Jenkins build number: $BUILD_NUMBER"
+        
+    - name: Create deployment status
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const deployment = await github.rest.repos.createDeployment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: context.sha,
+            environment: '${{ steps.env-config.outputs.environment }}',
+            description: 'CEA Commerce deployment via Jenkins',
+            auto_merge: false,
+            required_contexts: []
+          });
+          
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: deployment.data.id,
+            state: 'in_progress',
+            description: 'Jenkins pipeline started',
+            target_url: '${{ env.JENKINS_URL }}/job/${{ env.JENKINS_JOB_NAME }}/${{ steps.jenkins-build.outputs.build_number }}'
+          });
+          
+    - name: Comment on PR (if applicable)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🚀 **Jenkins Deployment Triggered**
+            
+            - **Environment**: ${{ steps.env-config.outputs.environment }}
+            - **Branch**: ${{ steps.env-config.outputs.git_branch }}  
+            - **Skip Tests**: ${{ steps.env-config.outputs.skip_tests }}
+            - **Build**: [${{ steps.jenkins-build.outputs.build_number }}](${{ env.JENKINS_URL }}/job/${{ env.JENKINS_JOB_NAME }}/${{ steps.jenkins-build.outputs.build_number }})
+            
+            Monitor the deployment progress in Jenkins.`
+          });
