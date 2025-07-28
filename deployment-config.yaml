@@ -1,0 +1,100 @@
+# CEA Commerce Deployment Configuration
+# This file contains environment-specific settings for the Jenkins pipeline
+
+environments:
+  dev:
+    aws_region: "us-east-1"
+    ec2_instances:
+      - "i-1234567890abcdef0"
+    instance_type: "t3.medium"
+    commerce_suite_url: "https://dev-artifacts.company.com/Commerce-suite-2211.FP6.240510019.zip"
+    git_branch: "develop"
+    database:
+      host: "dev-db.company.internal"
+      port: 3306
+      name: "hybris_dev"
+    load_balancer:
+      target_group_arn: "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/dev-hybris/1234567890123456"
+    hybris:
+      admin_user: "admin"
+      debug_port: 8000
+      jvm_options: "-Xmx2g -XX:MaxPermSize=512m"
+    notifications:
+      email: "dev-team@company.com"
+      slack_webhook: "https://hooks.slack.com/services/dev/webhook"
+
+  staging:
+    aws_region: "us-east-1"
+    ec2_instances:
+      - "i-2345678901bcdef01"
+      - "i-3456789012cdef012"
+    instance_type: "t3.large"
+    commerce_suite_url: "https://staging-artifacts.company.com/Commerce-suite-2211.FP6.240510019.zip"
+    git_branch: "release"
+    database:
+      host: "staging-db.company.internal"
+      port: 3306
+      name: "hybris_staging"
+    load_balancer:
+      target_group_arn: "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/staging-hybris/2345678901234567"
+    hybris:
+      admin_user: "admin"
+      debug_port: 8000
+      jvm_options: "-Xmx4g -XX:MaxPermSize=1g"
+    notifications:
+      email: "staging-team@company.com"
+      slack_webhook: "https://hooks.slack.com/services/staging/webhook"
+
+  prod:
+    aws_region: "us-east-1"
+    ec2_instances:
+      - "i-4567890123def0123"
+      - "i-5678901234ef01234"
+      - "i-6789012345f012345"
+    instance_type: "m5.xlarge"
+    commerce_suite_url: "https://prod-artifacts.company.com/Commerce-suite-2211.FP6.240510019.zip"
+    git_branch: "main"
+    database:
+      host: "prod-db.company.internal"
+      port: 3306
+      name: "hybris_prod"
+    load_balancer:
+      target_group_arn: "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/prod-hybris/3456789012345678"
+    hybris:
+      admin_user: "admin"
+      debug_port: 8000
+      jvm_options: "-Xmx8g -XX:MaxPermSize=2g"
+    notifications:
+      email: "prod-team@company.com"
+      slack_webhook: "https://hooks.slack.com/services/prod/webhook"
+
+# Global settings
+global:
+  ceasap_home: "/opt/CEASAP"
+  hybris_home: "/opt/CEASAP/cx"
+  java_home: "/usr/lib/jvm/java-11-openjdk"
+  ant_home: "/opt/CEASAP/cx/hybris/bin/platform/apache-ant"
+  
+  # Timeout settings (in minutes)
+  timeouts:
+    build: 30
+    deploy: 45
+    health_check: 10
+    
+  # Retry settings
+  retries:
+    download: 3
+    ssh_connection: 5
+    health_check: 10
+    
+  # Health check settings
+  health_check:
+    url: "http://localhost:9001/hac"
+    timeout: 30
+    interval: 10
+    
+  # Backup settings
+  backup:
+    enabled: true
+    retention_days: 7
+    s3_bucket: "company-hybris-backups"
